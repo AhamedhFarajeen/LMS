@@ -57,64 +57,75 @@ export const clerkWebhooks = async(req, res)=> {
     }
 }
 
-const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
-
-export const stripeWebhooks = async (request,response) =>{
+export const stripeWebhooks = async (request, response) => {
     const sig = request.headers['stripe-signature'];
-
     let event;
 
     try {
-        event = StripeInstance.webhooks.constructEvent(request.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+        event = stripeInstance.webhooks.constructEvent(
+            request.body,
+            sig,
+            process.env.STRIPE_WEBHOOK_SECRET
+        );
     } catch (err) {
         return response.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // Handle the event
-   switch (event.type) {
-     case 'payment_intent.succeeded':{
-       const paymentIntent = event.data.object;
-       const paymentIntentId = paymentIntent.id;
-       const session = await stripeInstance.checkout.sessions.list({
-         payment_intent: paymentIntentId
-       })
-       const {purchaseId} = session.data[0].metadata;
-       const purchaseData = await Purchase.findById(purchaseId)
+    switch (event.type) {
+        case 'checkout.session.completed': {
+            const session = event.data.object;
+            const { purchaseId } = session.metadata;
 
-       const userData = await User.findById(purchaseData.userId)
-       const courseData = await Course.findById(purchaseData.courseId.toString())
+            const purchaseData = await Purchase.findById(purchaseId);
+            if (!purchaseData) {
+                return response.status(404).json({
+                    success: false,
+                    message: 'Purchase not found'
+                });
+            }
 
-       courseData.enrolledStudents.push(userData)
-       await courseData.save()
+            const userData = await User.findById(purchaseData.userId);
+            const courseData = await Course.findById(purchaseData.courseId.toString());
 
-       userData.enrolledCourses.push(courseData._id)
-       await userData.save()
+            if (!userData || !courseData) {
+                return response.status(404).json({
+                    success: false,
+                    message: 'User or course not found'
+                });
+            }
 
-       purchaseData.status = 'completed'
+            if (!courseData.enrolledStudents.includes(userData._id)) {
+                courseData.enrolledStudents.push(userData._id);
+                await courseData.save();
+            }
 
-       await purchaseData.save()
+            if (!userData.enrolledCourses.includes(courseData._id)) {
+                userData.enrolledCourses.push(courseData._id);
+                await userData.save();
+            }
 
-       break;
-     }
-     case 'payment_intent.payment_failed':{
-        const paymentIntent = event.data.object;
-         const paymentIntentId = paymentIntent.id;
-         const session = await stripeInstance.checkout.sessions.list({
-           payment_intent: paymentIntentId
-         })
-         const {purchaseId} = session.data[0].metadata;
-         const purchaseData = await Purchase.findById(purchaseId)
+            purchaseData.status = 'completed';
+            await purchaseData.save();
 
-         purchaseData.status = 'failed'
-         await purchaseData.save();
-      
-       break;
-     }
-     // ... handle other event types
-     default:
-       console.log(`Unhandled event type ${event.type}`);
-   }
+            break;
+        }
 
-   // Return a response to acknowledge receipt of the event
-   response.json({received: true});
-}
+        case 'checkout.session.expired': {
+            const session = event.data.object;
+            const { purchaseId } = session.metadata;
+
+            const purchaseData = await Purchase.findById(purchaseId);
+            if (purchaseData) {
+                purchaseData.status = 'failed';
+                await purchaseData.save();
+            }
+
+            break;
+        }
+
+        default:
+            console.log(`Unhandled event type ${event.type}`);
+    }
+
+    response.json({ received: true });
+};

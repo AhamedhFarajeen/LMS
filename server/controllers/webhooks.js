@@ -4,6 +4,8 @@ import Stripe from "stripe";
 import { Purchase } from "../models/Purchase.js";
 import Course from "../models/Course.js";
 
+const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY);
+
 //Api controller function to manage clerk user with databse
 export const clerkWebhooks = async(req, res)=> {
     try{

@@ -59,75 +59,47 @@ export const clerkWebhooks = async(req, res)=> {
     }
 }
 
-export const stripeWebhooks = async (request, response) => {
-    const sig = request.headers['stripe-signature'];
-    let event;
+export const stripeWebhooks = async (req, res) => {
+  const sig = req.headers["stripe-signature"];
 
-    try {
-        event = stripeInstance.webhooks.constructEvent(
-            request.body,
-            sig,
-            process.env.STRIPE_WEBHOOK_SECRET
-        );
-    } catch (err) {
-        return response.status(400).send(`Webhook Error: ${err.message}`);
+  let event;
+
+  try {
+    event = stripeInstance.webhooks.constructEvent(
+      req.body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+  } catch (error) {
+    console.log("Webhook error:", error.message);
+    return res.status(400).send(`Webhook Error: ${error.message}`);
+  }
+
+  try {
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object;
+
+      const purchaseId = session.metadata.purchaseId;
+
+      const purchaseData = await Purchase.findById(purchaseId);
+
+      if (!purchaseData) {
+        return res.json({ received: true });
+      }
+
+      purchaseData.status = "completed";
+      await purchaseData.save();
+
+      await User.findByIdAndUpdate(purchaseData.userId, {
+        $addToSet: {
+          enrolledCourses: purchaseData.courseId,
+        },
+      });
     }
 
-    switch (event.type) {
-        case 'checkout.session.completed': {
-            const session = event.data.object;
-            const { purchaseId } = session.metadata;
-
-            const purchaseData = await Purchase.findById(purchaseId);
-            if (!purchaseData) {
-                return response.status(404).json({
-                    success: false,
-                    message: 'Purchase not found'
-                });
-            }
-
-            const userData = await User.findById(purchaseData.userId);
-            const courseData = await Course.findById(purchaseData.courseId.toString());
-
-            if (!userData || !courseData) {
-                return response.status(404).json({
-                    success: false,
-                    message: 'User or course not found'
-                });
-            }
-
-            if (!courseData.enrolledStudents.includes(userData._id)) {
-                courseData.enrolledStudents.push(userData._id);
-                await courseData.save();
-            }
-
-            if (!userData.enrolledCourses.includes(courseData._id)) {
-                userData.enrolledCourses.push(courseData._id);
-                await userData.save();
-            }
-
-            purchaseData.status = 'completed';
-            await purchaseData.save();
-
-            break;
-        }
-
-        case 'checkout.session.expired': {
-            const session = event.data.object;
-            const { purchaseId } = session.metadata;
-
-            const purchaseData = await Purchase.findById(purchaseId);
-            if (purchaseData) {
-                purchaseData.status = 'failed';
-                await purchaseData.save();
-            }
-
-            break;
-        }
-
-        default:
-            console.log(`Unhandled event type ${event.type}`);
-    }
-
-    response.json({ received: true });
+    res.json({ received: true });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ error: error.message });
+  }
 };

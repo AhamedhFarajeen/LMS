@@ -9,42 +9,29 @@ import Rating from "../../components/student/Rating";
 import axios from "axios";
 import { toast } from "react-toastify";
 import Loading from "../../components/student/Loading";
+import { getYouTubeVideoId } from "../../utils/youtube";
+
+const getLectureId = (lecture) => lecture.lectureid || lecture.lectureId;
 
 const Player = () => {
   const {
     enrolledCourses,
+    enrolledCoursesLoaded,
     calculateChapterTime,
     backendUrl,
     getToken,
     userData,
     fetchUserEnrolledCourses,
+    navigate,
   } = useContext(AppContext);
   const { courseId } = useParams();
-  const [courseData, setCourseData] = useState(null);
   const [openSection, setOpenSection] = useState({});
   const [playerData, setPlayerData] = useState(null);
   const [progressData, setProgressData] = useState(null);
-  const [initialRating, setInitialRating] = useState(0);
-
-  const getCourseData = () => {
-    enrolledCourses.map((course) => {
-      if (course._id === courseId) {
-        setCourseData(course);
-
-        course.courseRatings.map((item) => {
-          if (item.userId === userData._id) {
-            setInitialRating(item.rating);
-          }
-        });
-      }
-    });
-  };
-
-  useEffect(() => {
-    if (enrolledCourses.length > 0) {
-      getCourseData();
-    }
-  }, [enrolledCourses]);
+  const courseData = enrolledCourses.find((item) => item._id === courseId);
+  const initialRating =
+    courseData?.courseRatings.find((item) => item.userId === userData?._id)
+      ?.rating || 0;
 
   const markLectureAsCompleted = async (lectureId) => {
     try {
@@ -57,25 +44,6 @@ const Player = () => {
 
       if (data.success) {
         toast.success(data.message);
-        getCourseProgress();
-      } else {
-        toast.error(data.message);
-      }
-    } catch (error) {
-      toast.error(error.message);
-    }
-  };
-
-  const getCourseProgress = async () => {
-    try {
-      const token = await getToken();
-      const { data } = await axios.post(
-        backendUrl + "/api/user/get-course-progress",
-        { courseId },
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-
-      if (data.success) {
         setProgressData(data.progressData);
       } else {
         toast.error(data.message);
@@ -106,11 +74,55 @@ const Player = () => {
   };
 
   useEffect(() => {
-    getCourseProgress();
-  }, []);
+    if (!courseData) return;
+
+    let cancelled = false;
+    const loadProgress = async () => {
+      try {
+        const token = await getToken();
+        const { data } = await axios.post(
+          backendUrl + "/api/user/get-course-progress",
+          { courseId },
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+
+        if (!cancelled) {
+          if (data.success) {
+            setProgressData(data.progressData);
+          } else {
+            toast.error(data.message);
+          }
+        }
+      } catch (error) {
+        if (!cancelled) toast.error(error.message);
+      }
+    };
+
+    loadProgress();
+    return () => {
+      cancelled = true;
+    };
+  }, [backendUrl, courseData, courseId, getToken]);
 
   const toggleSection = (index) => {
     setOpenSection((prev) => ({ ...prev, [index]: !prev[index] }));
+  };
+
+  const watchLecture = (lecture, chapterIndex, lectureIndex) => {
+    const videoId = getYouTubeVideoId(lecture.lectureUrl);
+
+    if (!videoId) {
+      toast.error("This lecture does not have a valid YouTube video link.");
+      return;
+    }
+
+    setPlayerData({
+      ...lecture,
+      videoId,
+      lectureId: getLectureId(lecture),
+      chapter: chapterIndex + 1,
+      lecture: lectureIndex + 1,
+    });
   };
 
   return courseData ? (
@@ -156,7 +168,7 @@ const Player = () => {
                             src={
                               progressData &&
                               progressData.lectureCompleted.includes(
-                                lecture.lectureId,
+                                getLectureId(lecture),
                               )
                                 ? assets.blue_tick_icon
                                 : assets.play_icon
@@ -168,18 +180,13 @@ const Player = () => {
                             <p>{lecture.lectureTitle}</p>
                             <div className="flex gap-2">
                               {lecture.lectureUrl && (
-                                <p
-                                  onClick={() =>
-                                    setPlayerData({
-                                      ...lecture,
-                                      chapter: index + 1,
-                                      lecture: i + 1,
-                                    })
-                                  }
+                                <button
+                                  type="button"
+                                  onClick={() => watchLecture(lecture, index, i)}
                                   className="text-blue-500 cursor-pointer"
                                 >
                                   Watch
-                                </p>
+                                </button>
                               )}
                               <p>
                                 {humanizeDuration(
@@ -207,7 +214,8 @@ const Player = () => {
           {playerData ? (
             <div>
               <YouTube
-                videoId={playerData.lectureUrl.split("/").pop()}
+                videoId={playerData.videoId}
+                opts={{ playerVars: { autoplay: 1 } }}
                 iframeClassName="w-full aspect-video"
               />
 
@@ -217,7 +225,8 @@ const Player = () => {
                   {playerData.lectureTitle}
                 </p>
                 <button
-                  onClick={markLectureAsCompleted(playerData.lectureId)}
+                  type="button"
+                  onClick={() => markLectureAsCompleted(playerData.lectureId)}
                   className="text-blue-600"
                 >
                   {progressData &&
@@ -234,6 +243,22 @@ const Player = () => {
       </div>
       <Footer />
     </>
+  ) : enrolledCoursesLoaded ? (
+    <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4 px-6 text-center">
+      <h1 className="text-2xl font-semibold text-gray-800">
+        Course access is not available yet
+      </h1>
+      <p className="text-gray-500">
+        Please return to your enrollments and try opening the course again.
+      </p>
+      <button
+        type="button"
+        onClick={() => navigate("/my-enrollments")}
+        className="rounded bg-blue-600 px-5 py-2.5 text-white"
+      >
+        My Enrollments
+      </button>
+    </div>
   ) : (
     <Loading />
   );

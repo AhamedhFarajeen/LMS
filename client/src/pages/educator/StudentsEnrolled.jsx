@@ -1,5 +1,4 @@
 import React, { useContext, useEffect, useState } from "react";
-import { dummyStudentEnrolled } from "../../assets/assets";
 import Loading from "../../components/student/Loading";
 import { AppContext } from "../../context/AppContext";
 import { toast } from "react-toastify";
@@ -9,29 +8,35 @@ const StudentsEnrolled = () => {
   const { backendUrl, getToken, isEducator } = useContext(AppContext);
   const [enrolledStudents, setEnrolledStudents] = useState(null);
 
-  const fetchEnrolledStudents = async () => {
-    try {
-      const token = await getToken();
-      const { data } = await axios.get(
-        backendUrl + "/api/educator/enrolled-students",
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
-
-      if (data.success) {
-        setEnrolledStudents(data.enrolledStudents.reverse());
-      } else {
-        toast.error(data.message);
-      }
-    } catch (error) {
-      toast.error(error.message);
-    }
-  };
-
   useEffect(() => {
-    if (isEducator) {
-      fetchEnrolledStudents();
-    }
-  }, [isEducator]);
+    if (!isEducator) return;
+
+    let cancelled = false;
+    const loadStudents = async () => {
+      try {
+        const token = await getToken();
+        const { data } = await axios.get(
+          backendUrl + "/api/educator/enrolled-students",
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+
+        if (!cancelled) {
+          if (data.success) {
+            setEnrolledStudents(data.enrolledStudents);
+          } else {
+            toast.error(data.message);
+          }
+        }
+      } catch (error) {
+        if (!cancelled) toast.error(error.message);
+      }
+    };
+
+    loadStudents();
+    return () => {
+      cancelled = true;
+    };
+  }, [backendUrl, getToken, isEducator]);
 
   return enrolledStudents ? (
     <div className="min-h-screen flex flex-col items-start justify-between md:p-8 md:pb-0 p-4 pt-8 pb-0">
@@ -55,7 +60,7 @@ const StudentsEnrolled = () => {
           </thead>
           <tbody className="text-sm text-gray-500">
             {enrolledStudents.map((item, index) => (
-              <tr key={index} className="border-b border-gray-500/20">
+              <tr key={item.purchaseId} className="border-b border-gray-500/20">
                 <td className="px-4 py-3 text-center hidden sm:table-cell">
                   {index + 1}
                 </td>
@@ -65,14 +70,24 @@ const StudentsEnrolled = () => {
                     alt=""
                     className="w-9 h-9 rounded-full"
                   />
-                  <span className="trunacate">{item.student.name}</span>
+                  <span className="truncate">{item.student.name}</span>
                 </td>
-                <td className="px-4 py-3 trunacate">{item.courseTitle}</td>
+                <td className="px-4 py-3 truncate">{item.courseTitle}</td>
                 <td className="px-4 py-3 hidden sm:table-cell">
                   {new Date(item.purchaseDate).toLocaleDateString()}
                 </td>
               </tr>
             ))}
+            {enrolledStudents.length === 0 && (
+              <tr>
+                <td
+                  colSpan={4}
+                  className="px-4 py-8 text-center text-gray-400"
+                >
+                  No enrolled students yet
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

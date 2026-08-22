@@ -1,7 +1,7 @@
 import {clerkClient} from '@clerk/express'
 import Course from '../models/Course.js'
 import { v2 as cloudinary } from 'cloudinary'
-import User from '../models/User.js'
+import '../models/User.js'
 import { Purchase } from '../models/Purchase.js'
 
 
@@ -128,10 +128,42 @@ export const getEducatorCourses = async (req, res) => {
         }
 
         const courses = await Course.find({ educator: userId })
+            .sort({ createdAt: -1 })
+            .lean()
+
+        const courseIds = courses.map(course => course._id)
+        const purchaseStats = await Purchase.aggregate([
+            {
+                $match: {
+                    courseId: { $in: courseIds },
+                    status: 'completed'
+                }
+            },
+            {
+                $group: {
+                    _id: '$courseId',
+                    enrolledStudentsCount: { $sum: 1 },
+                    earnings: { $sum: '$amount' }
+                }
+            }
+        ])
+
+        const statsByCourse = new Map(
+            purchaseStats.map(stats => [stats._id.toString(), stats])
+        )
+        const coursesWithStats = courses.map(course => {
+            const stats = statsByCourse.get(course._id.toString())
+
+            return {
+                ...course,
+                enrolledStudentsCount: stats?.enrolledStudentsCount || 0,
+                earnings: stats?.earnings || 0
+            }
+        })
 
         res.json({
             success: true,
-            courses
+            courses: coursesWithStats
         })
     } catch (error) {
         res.status(500).json({
@@ -141,68 +173,77 @@ export const getEducatorCourses = async (req, res) => {
     }
 }
 
-export const educatorDashboardData = async(req,res) =>{
+export const educatorDashboardData = async (req, res) => {
     try {
-        const educator = req.auth.userId
-
-        const courses = await Course.find({educator});
-        const totalCourses = courses.length;
-
-        const courseIds = courses.map(course => course._id)
-        // calculate total earnings from purchases
-        const purchases = await Purchase.find({
-            courseId: {$in: courseIds},
-            status: 'completed'
-        });
-
-        const totalEarnings =purchases.reduce((sum, purchase) => sum + purchase.amount, 0)
-        
-        // collect unique enrolled students ids with their course title
-
-        const enrolledStudentsData = [];
-        for(const course of courses){
-            const students = await User.find({
-                _id: {$in: course.enrolledStudents}
-            }, 'name imageUrl')
-
-            students.forEach(student => {
-                enrolledStudentsData.push({
-                    courseTitle: course.courseTitle,
-                    student
-                });
-            });
-        }
-        res.json({success: true, dashboardData: {
-            totalEarnings,enrolledStudentsData, totalCourses
-        }})
-    } catch (error) {
-        res.json({success: false, message:error.message})    
-    }
-}
-
-export const getEnrolledStudentsData = async(req,res) =>{
-    try {
-        const educator = req.auth.userId;
-        const courses = await Course.find({educator})
+        const { userId } = req.auth()
+        const courses = await Course.find({ educator: userId }).select('_id')
         const courseIds = courses.map(course => course._id)
 
         const purchases = await Purchase.find({
-            courseId: {$in: courseIds},
+            courseId: { $in: courseIds },
             status: 'completed'
-        }).populate('userId', 'name imageUrl').populate('courseId', 'courseTitle')
+        })
+            .sort({ createdAt: -1 })
+            .populate('userId', 'name imageUrl')
+            .populate('courseId', 'courseTitle')
 
-        const enrolledStudents = purchases.map(purchase => ({
+        const validPurchases = purchases.filter(
+            purchase => purchase.userId && purchase.courseId
+        )
+        const totalEarnings = purchases.reduce(
+            (sum, purchase) => sum + Number(purchase.amount),
+            0
+        )
+        const totalStudents = new Set(
+            validPurchases.map(purchase => purchase.userId._id.toString())
+        ).size
+        const enrolledStudentsData = validPurchases.map(purchase => ({
+            purchaseId: purchase._id,
             student: purchase.userId,
             courseTitle: purchase.courseId.courseTitle,
             purchaseDate: purchase.createdAt
-        }));
+        }))
 
-        res.json({success: true, enrolledStudents});
-
+        res.json({
+            success: true,
+            dashboardData: {
+                totalEarnings,
+                totalCourses: courses.length,
+                totalStudents,
+                totalEnrollments: purchases.length,
+                enrolledStudentsData
+            }
+        })
     } catch (error) {
-        res.json({success: false, message:error.message})
+        res.json({ success: false, message: error.message })
     }
 }
 
+export const getEnrolledStudentsData = async (req, res) => {
+    try {
+        const { userId } = req.auth()
+        const courses = await Course.find({ educator: userId }).select('_id')
+        const courseIds = courses.map(course => course._id)
 
+        const purchases = await Purchase.find({
+            courseId: { $in: courseIds },
+            status: 'completed'
+        })
+            .sort({ createdAt: -1 })
+            .populate('userId', 'name imageUrl')
+            .populate('courseId', 'courseTitle')
 
+        const enrolledStudents = purchases
+            .filter(purchase => purchase.userId && purchase.courseId)
+            .map(purchase => ({
+                purchaseId: purchase._id,
+                student: purchase.userId,
+                courseTitle: purchase.courseId.courseTitle,
+                purchaseDate: purchase.createdAt
+            }))
+
+        res.json({ success: true, enrolledStudents })
+    } catch (error) {
+        res.json({ success: false, message: error.message })
+    }
+}

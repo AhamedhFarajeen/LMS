@@ -1,4 +1,4 @@
-import React, { act, useContext, useEffect, useRef, useState } from "react";
+import React, { useContext, useEffect, useRef, useState } from "react";
 import uniqid from "uniqid";
 import Quill from "quill";
 import { assets } from "../../assets/assets";
@@ -337,6 +337,7 @@ const AddCourse = () => {
                     type="text"
                     className="mt-1 block w-full border rounded py-1 px-2"
                     value={lectureDetails.lectureUrl}
+                    placeholder="https://www.youtube.com/watch?v=..."
                     onChange={(e) =>
                       setLectureDetails({
                         ...lectureDetails,
@@ -351,11 +352,11 @@ const AddCourse = () => {
                   <input
                     type="checkbox"
                     className="mt-1 scale-125"
-                    value={lectureDetails.isPreviewFree}
+                    checked={lectureDetails.isPreviewFree}
                     onChange={(e) =>
                       setLectureDetails({
                         ...lectureDetails,
-                        isPreviewFree: e.target.value,
+                        isPreviewFree: e.target.checked,
                       })
                     }
                   />

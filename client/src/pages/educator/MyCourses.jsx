@@ -2,28 +2,41 @@ import React, { useContext, useEffect, useState } from "react";
 import { AppContext } from "../../context/AppContext";
 import Loading from "../../components/student/Loading";
 import axios from "axios";
+import { toast } from "react-toastify";
 
 const MyCourses = () => {
   const { currency, backendUrl, isEducator, getToken } = useContext(AppContext);
   const [courses, setCourses] = useState(null);
-  const fetchEducatorCourses = async () => {
-    try {
-      const token = await getToken();
-      const { data } = await axios.get(backendUrl + "/api/educator/courses", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      data.success && setCourses(data.courses);
-    } catch (error) {
-      toast.error(error.message);
-    }
-  };
 
   useEffect(() => {
-    if (isEducator) {
-      fetchEducatorCourses();
-    }
-  }, [isEducator]);
+    if (!isEducator) return;
+
+    let cancelled = false;
+    const loadCourses = async () => {
+      try {
+        const token = await getToken();
+        const { data } = await axios.get(
+          backendUrl + "/api/educator/courses",
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+
+        if (!cancelled) {
+          if (data.success) {
+            setCourses(data.courses);
+          } else {
+            toast.error(data.message);
+          }
+        }
+      } catch (error) {
+        if (!cancelled) toast.error(error.message);
+      }
+    };
+
+    loadCourses();
+    return () => {
+      cancelled = true;
+    };
+  }, [backendUrl, getToken, isEducator]);
 
   return courses ? (
     <div className="h-screen flex flex-col items-start justify-between md:p-8 md:pb-0 p-4 pt-8 pb-0">
@@ -57,18 +70,13 @@ const MyCourses = () => {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    {currency}{" "}
-                    {Math.floor(
-                      course.enrolledStudents.length *
-                        (course.coursePrice -
-                          (course.discount * course.coursePrice) / 100),
-                    )}
+                    {currency}{Number(course.earnings).toFixed(2)}
                   </td>
                   <td className="px-4 py-3">
-                    {course.enrolledStudents.length}
+                    {course.enrolledStudentsCount}
                   </td>
                   <td className="px-4 py-3">
-                    {new Date(course.createAt).toLocaleDateString()}
+                    {new Date(course.createdAt).toLocaleDateString()}
                   </td>
                 </tr>
               ))}

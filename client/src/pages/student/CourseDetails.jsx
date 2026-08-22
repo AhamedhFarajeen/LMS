@@ -8,38 +8,36 @@ import Footer from "../../components/student/Footer";
 import YouTube from "react-youtube";
 import axios from "axios";
 import { toast } from "react-toastify";
+import { getYouTubeVideoId } from "../../utils/youtube";
 
 const CourseDetails = () => {
   const { id } = useParams();
   const [courseData, setCourseData] = useState(null);
   const [openSection, setOpenSection] = useState({});
-  const [isAlreadyEnrolled, setIsAlreadyEnrolled] = useState(false);
   const [playerData, setPlayerData] = useState(null);
 
   const {
-    allCourses,
     calculateRating,
-    calculateChapteraTime,
-    CalculateNoofLectures,
+    calculateChapterTime,
+    calculateNoOfLectures,
     calculateCourseDuration,
     currency,
     backendUrl,
     userData,
+    enrolledCourses,
     getToken,
+    navigate,
   } = useContext(AppContext);
-
-  const fetchCourseData = async () => {
-    try {
-      const { data } = await axios.get(backendUrl + "/api/course/" + id);
-      if (data.success) {
-        setCourseData(data.courseData);
-      } else {
-        toast.error(data.message);
-      }
-    } catch (error) {
-      toast.error(error.message);
-    }
-  };
+  const enrolledCourse = enrolledCourses.find((course) => course._id === id);
+  const visibleCourseContent =
+    enrolledCourse?.courseContent || courseData?.courseContent || [];
+  const isAlreadyEnrolled = Boolean(
+    courseData &&
+      (enrolledCourse ||
+        userData?.enrolledCourses.some(
+          (courseId) => courseId.toString() === courseData._id,
+        )),
+  );
 
   const enrollCourse = async () => {
     try {
@@ -47,7 +45,8 @@ const CourseDetails = () => {
         return toast.warn("Login to Enroll!");
       }
       if (isAlreadyEnrolled) {
-        return toast.warn("Already Enrolled");
+        navigate(`/player/${courseData._id}`);
+        return;
       }
 
       const token = await getToken();
@@ -69,17 +68,41 @@ const CourseDetails = () => {
   };
 
   useEffect(() => {
-    fetchCourseData();
-  }, []);
+    let cancelled = false;
+    const loadCourse = async () => {
+      try {
+        const { data } = await axios.get(backendUrl + "/api/course/" + id);
+        if (!cancelled) {
+          if (data.success) {
+            setCourseData(data.courseData);
+          } else {
+            toast.error(data.message);
+          }
+        }
+      } catch (error) {
+        if (!cancelled) toast.error(error.message);
+      }
+    };
 
-  useEffect(() => {
-    if (userData && courseData) {
-      setIsAlreadyEnrolled(userData.enrolledCourses.includes(courseData._id));
-    }
-  }, [userData, courseData]);
+    loadCourse();
+    return () => {
+      cancelled = true;
+    };
+  }, [backendUrl, id]);
 
   const toggleSection = (index) => {
     setOpenSection((prev) => ({ ...prev, [index]: !prev[index] }));
+  };
+
+  const playLecture = (lecture) => {
+    const videoId = getYouTubeVideoId(lecture.lectureUrl);
+
+    if (!videoId) {
+      toast.error("This lecture does not have a valid YouTube video link.");
+      return;
+    }
+
+    setPlayerData({ videoId });
   };
 
   return courseData ? (
@@ -138,7 +161,7 @@ const CourseDetails = () => {
             <h2 className="text-xl font-semibold">Course Structure</h2>
 
             <div className="pt-5">
-              {courseData.courseContent.map((chapter, index) => (
+              {visibleCourseContent.map((chapter, index) => (
                 <div
                   key={index}
                   className="border border-gray-300 bg-white mb-2 rounded"
@@ -159,7 +182,7 @@ const CourseDetails = () => {
                     </div>
                     <p className="text-sm md:text-['15px', '21px']">
                       {chapter.chapterContent.length} lectures -{" "}
-                      {calculateChapteraTime(chapter)}
+                      {calculateChapterTime(chapter)}
                     </p>
                   </div>
 
@@ -177,19 +200,24 @@ const CourseDetails = () => {
                           <div className="flex items-center justify-between w-full text-gray-800 text-xs md:text-['15px', '21px']">
                             <p>{lecture.lectureTitle}</p>
                             <div className="flex gap-2">
-                              {lecture.isPreviewFree && (
-                                <p
-                                  onClick={() =>
-                                    setPlayerData({
-                                      videoId: lecture.lectureUrl
-                                        .split("/")
-                                        .pop(),
-                                    })
-                                  }
+                              {enrolledCourse ? (
+                                <button
+                                  type="button"
+                                  onClick={() => playLecture(lecture)}
                                   className="text-blue-500 cursor-pointer"
                                 >
-                                  Preview
-                                </p>
+                                  Watch
+                                </button>
+                              ) : (
+                                lecture.isPreviewFree && (
+                                  <button
+                                    type="button"
+                                    onClick={() => playLecture(lecture)}
+                                    className="text-blue-500 cursor-pointer"
+                                  >
+                                    Preview
+                                  </button>
+                                )
                               )}
                               <p>
                                 {humanizeDuration(
@@ -278,14 +306,14 @@ const CourseDetails = () => {
 
               <div className="flex items-center gap-1">
                 <img src={assets.lesson_icon} alt="clock icon" />
-                <p>{CalculateNoofLectures(courseData)} lessons</p>
+                <p>{calculateNoOfLectures(courseData)} lessons</p>
               </div>
             </div>
             <button
               onClick={enrollCourse}
               className="md:mt-6 mt-4 w-full py-3 rounded bg-blue-600 text-white font-medium"
             >
-              {isAlreadyEnrolled ? "Already Enrolled" : "Enroll Now"}
+              {isAlreadyEnrolled ? "Go to Course" : "Enroll Now"}
             </button>
 
             <div className="pt-6">
